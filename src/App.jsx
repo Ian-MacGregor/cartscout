@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 // ─── Utility: Persistent Storage ───
+// NOTE: This will be replaced with backend communications once backend is ready
 const Storage = {
   async get(key) {
     try {
@@ -25,6 +26,7 @@ const Storage = {
 };
 
 // ─── Grocery Database (realistic items with base prices) ───
+// NOTE: This is to be replaced with a dynamic web scraped DB in the future
 const GROCERY_DB = [
   { name: "Whole Milk (1 gal)", category: "Dairy", basePrice: 3.99 },
   { name: "2% Milk (1 gal)", category: "Dairy", basePrice: 3.89 },
