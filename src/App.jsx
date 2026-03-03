@@ -1,32 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  auth, lists as listsApi, items as itemsApi,
+  setSession, getSession, clearSession,
+  setStoredUser, getStoredUser,
+} from "./api";
 
-// ─── Utility: Persistent Storage ───
-// NOTE: This will be replaced with backend communications once backend is ready
-const Storage = {
-  async get(key) {
-    try {
-      const r = await window.storage.get(key);
-      return r ? JSON.parse(r.value) : null;
-    } catch { return null; }
-  },
-  async set(key, val) {
-    try {
-      await window.storage.set(key, JSON.stringify(val));
-    } catch (e) { console.error("Storage error:", e); }
-  },
-  async delete(key) {
-    try { await window.storage.delete(key); } catch {}
-  },
-  async list(prefix) {
-    try {
-      const r = await window.storage.list(prefix);
-      return r?.keys || [];
-    } catch { return []; }
-  }
-};
-
-// ─── Grocery Database (realistic items with base prices) ───
-// NOTE: This is to be replaced with a dynamic web scraped DB in the future
+// ─── Grocery Database (client-side catalog for searching — still simulated) ───
 const GROCERY_DB = [
   { name: "Whole Milk (1 gal)", category: "Dairy", basePrice: 3.99 },
   { name: "2% Milk (1 gal)", category: "Dairy", basePrice: 3.89 },
@@ -87,7 +66,7 @@ const GROCERY_DB = [
   { name: "Ice Cream (1.5 qt)", category: "Frozen", basePrice: 5.49 },
 ];
 
-// ─── Simulated Store Generator ───
+// ─── Simulated Store Generator (will be replaced by real data later) ───
 const STORE_CHAINS = [
   { name: "Walmart Supercenter", tier: "budget", variance: 0.85 },
   { name: "Aldi", tier: "budget", variance: 0.80 },
@@ -127,23 +106,16 @@ function generateNearbyStores(lat, lng, radiusMiles = 20) {
     const dLng = (dist / (69 * Math.cos(lat * Math.PI / 180))) * Math.sin(angle);
     const storeLat = lat + dLat;
     const storeLng = lng + dLng;
-
     const prices = {};
     GROCERY_DB.forEach((item, idx) => {
       const itemSeed = i * 10000 + idx * 100 + Math.floor(lat * 10);
       const itemVariance = 0.9 + seededRandom(itemSeed) * 0.2;
       prices[item.name] = Math.round(item.basePrice * chain.variance * itemVariance * 100) / 100;
     });
-
     stores.push({
-      id: `store-${i}`,
-      name: chain.name,
+      id: `store-${i}`, name: chain.name,
       address: `${Math.floor(1000 + seededRandom(i * 300 + lat) * 9000)} ${["Main St", "Oak Ave", "Elm Dr", "Market Blvd", "Commerce Way", "Pine Rd"][i % 6]}`,
-      distance: Math.round(dist * 10) / 10,
-      lat: storeLat,
-      lng: storeLng,
-      tier: chain.tier,
-      prices,
+      distance: Math.round(dist * 10) / 10, lat: storeLat, lng: storeLng, tier: chain.tier, prices,
     });
   }
   return stores.sort((a, b) => a.distance - b.distance);
@@ -174,6 +146,7 @@ const Icons = {
   back: icon(20, <><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></>),
   dollar: icon(20, <><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></>),
   tag: icon(14, <><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></>),
+  loading: icon(20, <><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></>),
 };
 
 const TIER_COLORS = {
@@ -183,10 +156,26 @@ const TIER_COLORS = {
   premium: "#a855f7",
 };
 
+// ─── Helper: normalize API list data to our UI shape ───
+function normalizeList(apiList) {
+  return {
+    id: apiList.id,
+    name: apiList.name,
+    createdAt: apiList.created_at,
+    items: (apiList.list_items || []).map(li => ({
+      id: li.id,
+      name: li.product_name,
+      category: li.category,
+      basePrice: parseFloat(li.base_price),
+      qty: li.quantity,
+    })),
+  };
+}
+
 // ─── App Component ───
 export default function GroceryApp() {
   const [user, setUser] = useState(null);
-  const [view, setView] = useState("login"); // login, register, lists, editList, results
+  const [view, setView] = useState("login");
   const [lists, setLists] = useState([]);
   const [currentList, setCurrentList] = useState(null);
   const [location, setLocation] = useState(null);
@@ -194,60 +183,98 @@ export default function GroceryApp() {
   const [stores, setStores] = useState([]);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
+  const [loginForm, setLoginForm] = useState({ email: "", password: "", username: "" });
   const [error, setError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [expandedStore, setExpandedStore] = useState(null);
   const [animateIn, setAnimateIn] = useState(false);
+  const [saving, setSaving] = useState(false);
   const searchRef = useRef(null);
+  const saveTimeoutRef = useRef(null);
+
+  // ── Restore session on mount ──
+  useEffect(() => {
+    const existingSession = getSession();
+    const existingUser = getStoredUser();
+    if (existingSession && existingUser) {
+      setUser(existingUser);
+      triggerTransition("lists");
+      // Fetch lists in background
+      fetchLists();
+    }
+  }, []);
 
   // ── Auth ──
   const handleLogin = async () => {
-    if (!loginForm.username || !loginForm.password) {
-      setError("Please fill in both fields");
+    if (!loginForm.email || !loginForm.password) {
+      setError("Please fill in all fields");
       return;
     }
-    const userData = await Storage.get(`user:${loginForm.username}`);
-    if (!userData || userData.password !== loginForm.password) {
-      setError("Invalid username or password");
-      return;
-    }
-    setUser(userData);
+    setLoading(true);
     setError("");
-    const userLists = await Storage.get(`lists:${loginForm.username}`) || [];
-    setLists(userLists);
-    triggerTransition("lists");
+    try {
+      const data = await auth.login(loginForm.email, loginForm.password);
+      setSession(data.session);
+      setStoredUser(data.user);
+      setUser(data.user);
+      // Fetch lists from the server
+      const serverLists = await listsApi.getAll();
+      setLists(serverLists.map(normalizeList));
+      triggerTransition("lists");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleRegister = async () => {
-    if (!loginForm.username || !loginForm.password) {
-      setError("Please fill in both fields");
+    if (!loginForm.email || !loginForm.password || !loginForm.username) {
+      setError("Please fill in all fields");
       return;
     }
     if (loginForm.username.length < 3) {
       setError("Username must be at least 3 characters");
       return;
     }
-    const existing = await Storage.get(`user:${loginForm.username}`);
-    if (existing) {
-      setError("Username already taken");
+    if (loginForm.password.length < 6) {
+      setError("Password must be at least 6 characters");
       return;
     }
-    const userData = { username: loginForm.username, password: loginForm.password };
-    await Storage.set(`user:${loginForm.username}`, userData);
-    setUser(userData);
-    setLists([]);
+    setLoading(true);
     setError("");
-    triggerTransition("lists");
+    try {
+      const data = await auth.signup(loginForm.email, loginForm.password, loginForm.username);
+      setSession(data.session);
+      setStoredUser(data.user);
+      setUser(data.user);
+      setLists([]);
+      triggerTransition("lists");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleLogout = () => {
+    clearSession();
     setUser(null);
     setLists([]);
     setCurrentList(null);
-    setLoginForm({ username: "", password: "" });
+    setLoginForm({ email: "", password: "", username: "" });
     triggerTransition("login");
+  };
+
+  // ── Fetch lists from API ──
+  const fetchLists = async () => {
+    try {
+      const serverLists = await listsApi.getAll();
+      setLists(serverLists.map(normalizeList));
+    } catch (err) {
+      console.error("Failed to fetch lists:", err);
+    }
   };
 
   // ── Location ──
@@ -257,17 +284,14 @@ export default function GroceryApp() {
       setLocation({ lat: 43.1979, lng: -70.8737 });
       return;
     }
-    setLoading(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         setLocationName(`${pos.coords.latitude.toFixed(3)}°N, ${pos.coords.longitude.toFixed(3)}°W`);
-        setLoading(false);
       },
       () => {
         setLocation({ lat: 43.1979, lng: -70.8737 });
         setLocationName("Dover, NH (default)");
-        setLoading(false);
       },
       { timeout: 8000 }
     );
@@ -282,60 +306,159 @@ export default function GroceryApp() {
   }, [location]);
 
   // ── List Management ──
-  const saveLists = async (newLists) => {
-    setLists(newLists);
-    if (user) await Storage.set(`lists:${user.username}`, newLists);
-  };
-
-  const createList = () => {
-    const newList = { id: Date.now().toString(), name: "New Grocery List", items: [], createdAt: new Date().toISOString() };
-    setCurrentList(newList);
-    triggerTransition("editList");
-  };
-
-  const saveCurrentList = async () => {
-    if (!currentList) return;
-    const idx = lists.findIndex(l => l.id === currentList.id);
-    const newLists = idx >= 0 ? lists.map(l => l.id === currentList.id ? currentList : l) : [...lists, currentList];
-    await saveLists(newLists);
+  const createList = async () => {
+    setLoading(true);
+    try {
+      const newList = await listsApi.create("New Grocery List");
+      const normalized = normalizeList({ ...newList, list_items: [] });
+      setLists(prev => [normalized, ...prev]);
+      setCurrentList(normalized);
+      triggerTransition("editList");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const deleteList = async (id) => {
-    await saveLists(lists.filter(l => l.id !== id));
+    try {
+      await listsApi.delete(id);
+      setLists(prev => prev.filter(l => l.id !== id));
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
-  const addItem = (groceryItem) => {
+  // Debounced list name save
+  const saveListName = useCallback((listId, name) => {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await listsApi.update(listId, name);
+        setLists(prev => prev.map(l => l.id === listId ? { ...l, name } : l));
+      } catch (err) {
+        console.error("Failed to save list name:", err);
+      } finally {
+        setSaving(false);
+      }
+    }, 500);
+  }, []);
+
+  const updateListName = (name) => {
     if (!currentList) return;
-    const exists = currentList.items.find(i => i.name === groceryItem.name);
-    if (exists) {
-      setCurrentList({
-        ...currentList,
-        items: currentList.items.map(i => i.name === groceryItem.name ? { ...i, qty: i.qty + 1 } : i)
-      });
+    setCurrentList(prev => ({ ...prev, name }));
+    saveListName(currentList.id, name);
+  };
+
+  // ── Item Management ──
+  const addItem = async (groceryItem) => {
+    if (!currentList) return;
+    const existingItem = currentList.items.find(i => i.name === groceryItem.name);
+
+    if (existingItem) {
+      // Update quantity
+      const newQty = existingItem.qty + 1;
+      try {
+        await itemsApi.update(existingItem.id, newQty);
+        setCurrentList(prev => ({
+          ...prev,
+          items: prev.items.map(i => i.id === existingItem.id ? { ...i, qty: newQty } : i),
+        }));
+        // Update in lists array too
+        setLists(prev => prev.map(l => l.id === currentList.id
+          ? { ...l, items: l.items.map(i => i.id === existingItem.id ? { ...i, qty: newQty } : i) }
+          : l
+        ));
+      } catch (err) {
+        setError(err.message);
+      }
     } else {
-      setCurrentList({
-        ...currentList,
-        items: [...currentList.items, { ...groceryItem, qty: 1 }]
-      });
+      // Add new item
+      try {
+        const newItem = await itemsApi.add(currentList.id, groceryItem);
+        const normalizedItem = {
+          id: newItem.id,
+          name: newItem.product_name,
+          category: newItem.category,
+          basePrice: parseFloat(newItem.base_price),
+          qty: newItem.quantity,
+        };
+        setCurrentList(prev => ({
+          ...prev,
+          items: [...prev.items, normalizedItem],
+        }));
+        setLists(prev => prev.map(l => l.id === currentList.id
+          ? { ...l, items: [...l.items, normalizedItem] }
+          : l
+        ));
+      } catch (err) {
+        setError(err.message);
+      }
     }
     setSearchQuery("");
     setSearchResults([]);
   };
 
-  const updateItemQty = (name, delta) => {
+  const updateItemQty = async (itemId, delta) => {
     if (!currentList) return;
-    setCurrentList({
-      ...currentList,
-      items: currentList.items.map(i => i.name === name ? { ...i, qty: Math.max(0, i.qty + delta) } : i).filter(i => i.qty > 0)
-    });
+    const item = currentList.items.find(i => i.id === itemId);
+    if (!item) return;
+
+    const newQty = Math.max(0, item.qty + delta);
+
+    if (newQty === 0) {
+      // Remove item
+      try {
+        await itemsApi.delete(itemId);
+        setCurrentList(prev => ({
+          ...prev,
+          items: prev.items.filter(i => i.id !== itemId),
+        }));
+        setLists(prev => prev.map(l => l.id === currentList.id
+          ? { ...l, items: l.items.filter(i => i.id !== itemId) }
+          : l
+        ));
+      } catch (err) {
+        setError(err.message);
+      }
+    } else {
+      // Update quantity
+      try {
+        await itemsApi.update(itemId, newQty);
+        setCurrentList(prev => ({
+          ...prev,
+          items: prev.items.map(i => i.id === itemId ? { ...i, qty: newQty } : i),
+        }));
+        setLists(prev => prev.map(l => l.id === currentList.id
+          ? { ...l, items: l.items.map(i => i.id === itemId ? { ...i, qty: newQty } : i) }
+          : l
+        ));
+      } catch (err) {
+        setError(err.message);
+      }
+    }
   };
 
-  const removeItem = (name) => {
+  const removeItem = async (itemId) => {
     if (!currentList) return;
-    setCurrentList({ ...currentList, items: currentList.items.filter(i => i.name !== name) });
+    try {
+      await itemsApi.delete(itemId);
+      setCurrentList(prev => ({
+        ...prev,
+        items: prev.items.filter(i => i.id !== itemId),
+      }));
+      setLists(prev => prev.map(l => l.id === currentList.id
+        ? { ...l, items: l.items.filter(i => i.id !== itemId) }
+        : l
+      ));
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
-  // ── Search ──
+  // ── Search (still client-side against GROCERY_DB) ──
   useEffect(() => {
     if (searchQuery.trim().length < 1) { setSearchResults([]); return; }
     const q = searchQuery.toLowerCase();
@@ -344,7 +467,7 @@ export default function GroceryApp() {
     ).slice(0, 8));
   }, [searchQuery]);
 
-  // ── Price Comparison ──
+  // ── Price Comparison (still simulated) ──
   const comparePrices = () => {
     if (!currentList || currentList.items.length === 0 || stores.length === 0) return;
     const ranked = stores.map(store => ({
@@ -368,9 +491,6 @@ export default function GroceryApp() {
 
   useEffect(() => { setAnimateIn(true); }, []);
 
-  // Save list on changes
-  useEffect(() => { if (currentList && user) saveCurrentList(); }, [currentList]);
-
   const categories = [...new Set(GROCERY_DB.map(i => i.category))];
 
   // ─── RENDER ───
@@ -378,7 +498,7 @@ export default function GroceryApp() {
     <div style={styles.app}>
       <div style={styles.grain} />
 
-      {/* ── Login / Register ── */}
+      {/* ── Login ── */}
       {view === "login" && (
         <div style={{ ...styles.centerPanel, opacity: animateIn ? 1 : 0, transform: animateIn ? "translateY(0)" : "translateY(20px)", transition: "all 0.5s cubic-bezier(0.16, 1, 0.3, 1)" }}>
           <div style={styles.logoArea}>
@@ -388,12 +508,13 @@ export default function GroceryApp() {
           </div>
           <div style={styles.authCard}>
             {error && <div style={styles.errorBanner}>{error}</div>}
-            <label style={styles.label}>Username</label>
+            <label style={styles.label}>Email</label>
             <input
               style={styles.input}
-              value={loginForm.username}
-              onChange={e => { setLoginForm({ ...loginForm, username: e.target.value }); setError(""); }}
-              placeholder="Enter username"
+              type="email"
+              value={loginForm.email}
+              onChange={e => { setLoginForm({ ...loginForm, email: e.target.value }); setError(""); }}
+              placeholder="you@example.com"
               onKeyDown={e => e.key === "Enter" && handleLogin()}
             />
             <label style={{ ...styles.label, marginTop: 16 }}>Password</label>
@@ -405,12 +526,17 @@ export default function GroceryApp() {
               placeholder="Enter password"
               onKeyDown={e => e.key === "Enter" && handleLogin()}
             />
-            <button style={styles.primaryBtn} onClick={handleLogin}>Sign In</button>
-            <button style={styles.secondaryBtn} onClick={() => { setView("register"); setError(""); }}>Create Account</button>
+            <button style={styles.primaryBtn} onClick={handleLogin} disabled={loading}>
+              {loading ? "Signing in..." : "Sign In"}
+            </button>
+            <button style={styles.secondaryBtn} onClick={() => { setView("register"); setError(""); }}>
+              Create Account
+            </button>
           </div>
         </div>
       )}
 
+      {/* ── Register ── */}
       {view === "register" && (
         <div style={{ ...styles.centerPanel, opacity: animateIn ? 1 : 0, transform: animateIn ? "translateY(0)" : "translateY(20px)", transition: "all 0.5s cubic-bezier(0.16, 1, 0.3, 1)" }}>
           <div style={styles.logoArea}>
@@ -420,25 +546,36 @@ export default function GroceryApp() {
           </div>
           <div style={styles.authCard}>
             {error && <div style={styles.errorBanner}>{error}</div>}
-            <label style={styles.label}>Choose a Username</label>
+            <label style={styles.label}>Email</label>
+            <input
+              style={styles.input}
+              type="email"
+              value={loginForm.email}
+              onChange={e => { setLoginForm({ ...loginForm, email: e.target.value }); setError(""); }}
+              placeholder="you@example.com"
+            />
+            <label style={{ ...styles.label, marginTop: 16 }}>Display Name</label>
             <input
               style={styles.input}
               value={loginForm.username}
               onChange={e => { setLoginForm({ ...loginForm, username: e.target.value }); setError(""); }}
               placeholder="At least 3 characters"
-              onKeyDown={e => e.key === "Enter" && handleRegister()}
             />
-            <label style={{ ...styles.label, marginTop: 16 }}>Choose a Password</label>
+            <label style={{ ...styles.label, marginTop: 16 }}>Password</label>
             <input
               style={styles.input}
               type="password"
               value={loginForm.password}
               onChange={e => { setLoginForm({ ...loginForm, password: e.target.value }); setError(""); }}
-              placeholder="Enter password"
+              placeholder="At least 6 characters"
               onKeyDown={e => e.key === "Enter" && handleRegister()}
             />
-            <button style={styles.primaryBtn} onClick={handleRegister}>Create Account</button>
-            <button style={styles.secondaryBtn} onClick={() => { triggerTransition("login"); setError(""); }}>Back to Sign In</button>
+            <button style={styles.primaryBtn} onClick={handleRegister} disabled={loading}>
+              {loading ? "Creating account..." : "Create Account"}
+            </button>
+            <button style={styles.secondaryBtn} onClick={() => { triggerTransition("login"); setError(""); }}>
+              Back to Sign In
+            </button>
           </div>
         </div>
       )}
@@ -463,7 +600,9 @@ export default function GroceryApp() {
           <div style={styles.content}>
             <div style={styles.sectionHeader}>
               <h3 style={styles.sectionTitle}>My Grocery Lists</h3>
-              <button style={styles.addBtn} onClick={createList}>{Icons.plus} New List</button>
+              <button style={styles.addBtn} onClick={createList} disabled={loading}>
+                {Icons.plus} {loading ? "Creating..." : "New List"}
+              </button>
             </div>
 
             {lists.length === 0 ? (
@@ -524,13 +663,14 @@ export default function GroceryApp() {
         <div style={{ ...styles.mainPanel, opacity: animateIn ? 1 : 0, transform: animateIn ? "translateY(0)" : "translateY(12px)", transition: "all 0.4s cubic-bezier(0.16, 1, 0.3, 1)" }}>
           <header style={styles.header}>
             <div style={styles.headerLeft}>
-              <button style={styles.backBtn} onClick={() => triggerTransition("lists")}>{Icons.back}</button>
+              <button style={styles.backBtn} onClick={() => { fetchLists(); triggerTransition("lists"); }}>{Icons.back}</button>
               <input
                 style={styles.listNameInput}
                 value={currentList.name}
-                onChange={e => setCurrentList({ ...currentList, name: e.target.value })}
+                onChange={e => updateListName(e.target.value)}
                 placeholder="List name..."
               />
+              {saving && <span style={styles.savingIndicator}>Saving...</span>}
             </div>
             <button
               style={{ ...styles.primaryBtn, margin: 0, opacity: currentList.items.length === 0 ? 0.4 : 1, padding: "10px 24px" }}
@@ -593,18 +733,18 @@ export default function GroceryApp() {
                   </span>
                 </div>
                 {currentList.items.map((item, idx) => (
-                  <div key={item.name} style={{ ...styles.itemRow, animationDelay: `${idx * 30}ms` }}>
+                  <div key={item.id} style={{ ...styles.itemRow, animationDelay: `${idx * 30}ms` }}>
                     <div style={styles.itemInfo}>
                       <span style={styles.itemName}>{item.name}</span>
                       <span style={styles.itemCat}>{Icons.tag} {item.category}</span>
                     </div>
                     <div style={styles.qtyControls}>
-                      <button style={styles.qtyBtn} onClick={() => updateItemQty(item.name, -1)}>{Icons.minus}</button>
+                      <button style={styles.qtyBtn} onClick={() => updateItemQty(item.id, -1)}>{Icons.minus}</button>
                       <span style={styles.qtyNum}>{item.qty}</span>
-                      <button style={styles.qtyBtn} onClick={() => updateItemQty(item.name, 1)}>{Icons.plus}</button>
+                      <button style={styles.qtyBtn} onClick={() => updateItemQty(item.id, 1)}>{Icons.plus}</button>
                     </div>
                     <span style={styles.itemSubtotal}>${(item.basePrice * item.qty).toFixed(2)}</span>
-                    <button style={styles.removeBtn} onClick={() => removeItem(item.name)}>{Icons.trash}</button>
+                    <button style={styles.removeBtn} onClick={() => removeItem(item.id)}>{Icons.trash}</button>
                   </div>
                 ))}
               </div>
@@ -823,6 +963,7 @@ const styles = {
     fontSize: 20, fontWeight: 800, background: "none", border: "none", color: "#f1f5f9",
     outline: "none", flex: 1, minWidth: 200,
   },
+  savingIndicator: { fontSize: 12, color: "#64748b", fontStyle: "italic" },
   searchArea: { position: "relative", marginBottom: 24 },
   searchBox: {
     display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", borderRadius: 14,
