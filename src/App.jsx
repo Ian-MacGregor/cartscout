@@ -297,12 +297,23 @@ export default function GroceryApp() {
     );
   }, []);
 
-  useEffect(() => { if (user) getLocation(); }, [user, getLocation]);
-
+  // Use the user's location to search DB for nearby stores:
   useEffect(() => {
-    if (location) {
-      setStores(generateNearbyStores(location.lat, location.lng));
-    }
+    if (!location) return;
+    const fetchStores = async () => {
+      try {
+        const res = await fetch(
+          `${API_URL}/api/stores?lat=${location.lat}&lng=${location.lng}&radius=20`
+        );
+        const data = await res.json();
+        setStores(data);
+      } catch (err) {
+        console.error("Failed to fetch stores:", err);
+        // Fall back to simulated stores
+        setStores(generateNearbyStores(location.lat, location.lng));
+      }
+    };
+    fetchStores();
   }, [location]);
 
   // ── List Management ──
