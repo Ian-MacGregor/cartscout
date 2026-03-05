@@ -124,3 +124,12 @@ export const items = {
   delete: (itemId) =>
     request(`/api/items/${itemId}`, { method: "DELETE" }),
 };
+
+// ─── Location ───
+export const location = {
+  update: (lat, lng) =>
+    request("/api/location", {
+      method: "POST",
+      body: JSON.stringify({ lat, lng }),
+    }),
+};

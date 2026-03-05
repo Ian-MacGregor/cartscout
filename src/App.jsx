@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   auth, lists as listsApi, items as itemsApi,
+  location as locationApi,
   setSession, getSession, clearSession,
   setStoredUser, getStoredUser,
 } from "./api";
@@ -286,8 +287,12 @@ export default function GroceryApp() {
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        setLocationName(`${pos.coords.latitude.toFixed(3)}°N, ${pos.coords.longitude.toFixed(3)}°W`);
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setLocation({ lat, lng });
+        setLocationName(`${lat.toFixed(3)}°N, ${lng.toFixed(3)}°W`);
+        // Report to server for scraper coverage
+        locationApi.update(lat, lng).catch(() => {});
       },
       () => {
         setLocation({ lat: 43.1979, lng: -70.8737 });
