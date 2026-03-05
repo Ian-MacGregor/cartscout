@@ -201,8 +201,9 @@ export default function GroceryApp() {
     if (existingSession && existingUser) {
       setUser(existingUser);
       triggerTransition("lists");
-      // Fetch lists in background
       fetchLists();
+      // Explicitly trigger location on session restore
+      getLocation();
     }
   }, []);
 
@@ -219,10 +220,11 @@ export default function GroceryApp() {
       setSession(data.session);
       setStoredUser(data.user);
       setUser(data.user);
-      // Fetch lists from the server
       const serverLists = await listsApi.getAll();
       setLists(serverLists.map(normalizeList));
       triggerTransition("lists");
+      // Explicitly trigger location after login
+      getLocation();
     } catch (err) {
       setError(err.message);
     } finally {
