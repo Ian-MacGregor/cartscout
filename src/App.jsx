@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   auth, lists as listsApi, items as itemsApi,
-  location as locationApi,
+  location as locationApi, stores as storesApi,
   setSession, getSession, clearSession,
   setStoredUser, getStoredUser,
 } from "./api";
@@ -309,14 +309,10 @@ export default function GroceryApp() {
     if (!location) return;
     const fetchStores = async () => {
       try {
-        const res = await fetch(
-          `${API_URL}/api/stores?lat=${location.lat}&lng=${location.lng}&radius=20`
-        );
-        const data = await res.json();
+        const data = await storesApi.nearby(location.lat, location.lng);
         setStores(data);
       } catch (err) {
         console.error("Failed to fetch stores:", err);
-        // Fall back to simulated stores
         setStores(generateNearbyStores(location.lat, location.lng));
       }
     };

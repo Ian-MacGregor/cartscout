@@ -125,6 +125,12 @@ export const items = {
     request(`/api/items/${itemId}`, { method: "DELETE" }),
 };
 
+// ─── Stores ───
+export const stores = {
+  nearby: (lat, lng, radius = 20) =>
+    request(`/api/stores?lat=${lat}&lng=${lng}&radius=${radius}`),
+};
+
 // ─── Location ───
 export const location = {
   update: (lat, lng) =>
