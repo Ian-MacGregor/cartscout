@@ -310,8 +310,12 @@ export default function GroceryApp() {
     const fetchStores = async () => {
       try {
         const data = await storesApi.nearby(location.lat, location.lng);
-        console.log("Store data from API:", data[0]); // Log first store to see field names
-        setStores(data);
+        const normalized = data.map(s => ({
+          ...s,
+          name: s.store_name,
+          // distance is already added by the API endpoint
+        }));
+        setStores(normalized);
       } catch (err) {
         console.error("Failed to fetch stores:", err);
         setStores(generateNearbyStores(location.lat, location.lng));
