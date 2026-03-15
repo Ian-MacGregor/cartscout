@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   auth, lists as listsApi, items as itemsApi,
   location as locationApi, stores as storesApi,
+  compare as compareApi,
   setSession, getSession, clearSession,
   setStoredUser, getStoredUser,
   touchSession, isSessionExpired,
@@ -533,20 +534,37 @@ useEffect(() => {
   }, [searchQuery]);
 
   // ── Price Comparison (still simulated) ──
-  const comparePrices = () => {
-    if (!currentList || currentList.items.length === 0 || stores.length === 0) return;
-    const ranked = stores.map(store => ({
-      ...store,
-      total: calculateCartTotal(store, currentList.items),
-      itemPrices: currentList.items.map(item => ({
-        name: item.name,
-        qty: item.qty,
-        unitPrice: store.prices[item.name] || item.basePrice,
-        subtotal: (store.prices[item.name] || item.basePrice) * item.qty,
-      }))
-    })).sort((a, b) => a.total - b.total);
-    setResults(ranked.slice(0, 5));
-    triggerTransition("results");
+  const comparePrices = async () => {
+    if (!currentList || currentList.items.length === 0 || !location) return;
+    setLoading(true);
+    try {
+      const data = await compareApi.run(
+        location.lat, location.lng, 20,
+        currentList.items
+      );
+      setResults(data);
+      triggerTransition("results");
+    } catch (err) {
+      console.error("Compare failed, falling back to simulated:", err);
+      // Fallback to simulated comparison
+      const ranked = stores.map(store => ({
+        ...store,
+        total: calculateCartTotal(store, currentList.items),
+        hasLiveData: false,
+        liveItemCount: 0,
+        totalItemCount: currentList.items.length,
+        itemPrices: currentList.items.map(item => ({
+          name: item.name, qty: item.qty,
+          unitPrice: store.prices?.[item.name] || item.basePrice,
+          subtotal: (store.prices?.[item.name] || item.basePrice) * item.qty,
+          isLive: false,
+        }))
+      })).sort((a, b) => a.total - b.total);
+      setResults(ranked.slice(0, 5));
+      triggerTransition("results");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const triggerTransition = (newView) => {
@@ -839,6 +857,17 @@ useEffect(() => {
               </div>
             </div>
 
+            {results.some(s => !s.hasLiveData) && (
+              <div style={styles.dataBanner}>
+                <span style={styles.dataBannerIcon}>ℹ</span>
+                <span>
+                  Some stores show <strong>estimated prices</strong> because live
+                  pricing data is not yet available for them. Stores with live data
+                  are marked with a <span style={{ color: "#22c55e" }}>●</span> indicator.
+                </span>
+              </div>
+            )}
+
             <div style={styles.resultsGrid}>
               {results.map((store, idx) => {
                 const isExpanded = expandedStore === store.id;
@@ -862,7 +891,14 @@ useEffect(() => {
                         )}
                       </div>
                       <div style={styles.resultInfo}>
-                        <h4 style={styles.resultName}>{store.name}</h4>
+                        <h4 style={styles.resultName}>
+                          {store.name}
+                          {store.hasLiveData ? (
+                            <span style={styles.liveBadge}>● LIVE PRICES</span>
+                          ) : (
+                            <span style={styles.estBadge}>◐ ESTIMATED</span>
+                          )}
+                        </h4>
                         <p style={styles.resultAddr}>{Icons.pin} {store.address} — {store.distance} mi away</p>
                       </div>
                       <div style={styles.resultTotal}>
@@ -887,9 +923,18 @@ useEffect(() => {
                         </div>
                         {store.itemPrices.map(ip => (
                           <div key={ip.name} style={styles.breakdownRow}>
-                            <span style={styles.bkName}>{ip.name}</span>
+                            <span style={styles.bkName}>
+                              {ip.name}
+                              {ip.isLive && ip.promoPrice && <span style={styles.saleBadge}>SALE</span>}
+                            </span>
                             <span style={styles.bkQty}>×{ip.qty}</span>
-                            <span style={styles.bkUnit}>${ip.unitPrice.toFixed(2)}</span>
+                            <span style={{
+                              ...styles.bkUnit,
+                              color: ip.isLive ? "#22d3ee" : "#64748b",
+                            }}>
+                              ${ip.unitPrice.toFixed(2)}
+                              {!ip.isLive && <span style={{ fontSize: 9 }}> est</span>}
+                            </span>
                             <span style={styles.bkSub}>${ip.subtotal.toFixed(2)}</span>
                           </div>
                         ))}
@@ -1144,6 +1189,24 @@ const styles = {
   breakdownTotal: {
     display: "flex", justifyContent: "space-between", padding: "12px 0 0", marginTop: 4,
     borderTop: "1px solid rgba(255,255,255,0.08)", fontSize: 15, fontWeight: 800, color: "#f1f5f9",
+  },
+  dataBanner: {
+  display: "flex", alignItems: "flex-start", gap: 10, padding: "14px 18px",
+  background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.2)",
+  borderRadius: 12, marginBottom: 16, fontSize: 13, color: "#fbbf24", lineHeight: 1.5,
+  },
+  dataBannerIcon: { fontSize: 18, flexShrink: 0, marginTop: 1 },
+  liveBadge: {
+    fontSize: 10, fontWeight: 700, color: "#22c55e", marginLeft: 8,
+    letterSpacing: "0.03em",
+  },
+  estBadge: {
+    fontSize: 10, fontWeight: 700, color: "#f59e0b", marginLeft: 8,
+    letterSpacing: "0.03em",
+  },
+  saleBadge: {
+    fontSize: 9, fontWeight: 700, color: "#f43f5e", background: "rgba(244,63,94,0.15)",
+    padding: "1px 5px", borderRadius: 4, marginLeft: 6, verticalAlign: "middle",
   },
 };
 

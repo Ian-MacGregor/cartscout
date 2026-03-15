@@ -160,3 +160,12 @@ export const location = {
       body: JSON.stringify({ lat, lng }),
     }),
 };
+
+// ─── Price Comparison ───
+export const compare = {
+  run: (lat, lng, radius, items) =>
+    request("/api/compare", {
+      method: "POST",
+      body: JSON.stringify({ lat, lng, radius, items }),
+    }),
+};
