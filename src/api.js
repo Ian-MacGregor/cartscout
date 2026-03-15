@@ -6,14 +6,27 @@ const API_URL = import.meta.env.PROD
 
 let session = null;
 
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
 export function setSession(s) {
   session = s;
-  // Persist session to survive page refresh
   if (s) {
     sessionStorage.setItem("cartscout_session", JSON.stringify(s));
+    sessionStorage.setItem("cartscout_session_last_active", Date.now().toString());
   } else {
     sessionStorage.removeItem("cartscout_session");
+    sessionStorage.removeItem("cartscout_session_last_active");
   }
+}
+
+export function touchSession() {
+  sessionStorage.setItem("cartscout_session_last_active", Date.now().toString());
+}
+
+export function isSessionExpired() {
+  const lastActive = sessionStorage.getItem("cartscout_session_last_active");
+  if (!lastActive) return true;
+  return Date.now() - parseInt(lastActive) > SESSION_TIMEOUT_MS;
 }
 
 export function getSession() {
@@ -63,6 +76,14 @@ async function request(path, options = {}) {
   });
 
   const data = await res.json();
+
+  // If the server says unauthorized, the session is dead
+  if (res.status === 401) {
+    clearSession();
+    window.dispatchEvent(new CustomEvent("cartscout:session_expired"));
+    throw new Error("Session expired");
+  }
+
   if (!res.ok) throw new Error(data.error || "Request failed");
   return data;
 }

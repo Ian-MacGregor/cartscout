@@ -4,6 +4,7 @@ import {
   location as locationApi, stores as storesApi,
   setSession, getSession, clearSession,
   setStoredUser, getStoredUser,
+  touchSession, isSessionExpired,
 } from "./api";
 
 // ─── Grocery Database (client-side catalog for searching — still simulated) ───
@@ -194,18 +195,63 @@ export default function GroceryApp() {
   const searchRef = useRef(null);
   const saveTimeoutRef = useRef(null);
 
-  // ── Restore session on mount ──
-  useEffect(() => {
-    const existingSession = getSession();
-    const existingUser = getStoredUser();
-    if (existingSession && existingUser) {
-      setUser(existingUser);
-      triggerTransition("lists");
-      fetchLists();
-      // Explicitly trigger location on session restore
-      getLocation();
+  // ── Idle timeout: logout after 30 minutes of inactivity ──
+useEffect(() => {
+  if (!user) return;
+
+  let idleTimer = null;
+
+  const resetTimer = () => {
+    touchSession();
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      console.log("[session] Idle timeout reached, logging out");
+      handleLogout();
+    }, 30 * 60 * 1000);
+  };
+
+  // Activity events that reset the timer
+  const events = ["mousedown", "keydown", "scroll", "touchstart"];
+  events.forEach(e => window.addEventListener(e, resetTimer));
+
+  // Start the timer
+  resetTimer();
+
+  return () => {
+    clearTimeout(idleTimer);
+    events.forEach(e => window.removeEventListener(e, resetTimer));
+  };
+}, [user]);
+
+// ── Listen for session expired events from the API layer ──
+useEffect(() => {
+  const handleExpired = () => {
+    setError("Your session has expired. Please sign in again.");
+    handleLogout();
+  };
+
+  window.addEventListener("cartscout:session_expired", handleExpired);
+  return () => window.removeEventListener("cartscout:session_expired", handleExpired);
+}, []);
+
+// ── On mount: check if stored session is stale ──
+useEffect(() => {
+  const existingSession = getSession();
+  const existingUser = getStoredUser();
+
+  if (existingSession && existingUser) {
+    if (isSessionExpired()) {
+      console.log("[session] Stored session is expired, clearing");
+      clearSession();
+      setError("Your session has expired. Please sign in again.");
+      return;
     }
-  }, []);
+    setUser(existingUser);
+    triggerTransition("lists");
+    fetchLists();
+    getLocation();
+  }
+}, []);
 
   // ── Auth ──
   const handleLogin = async () => {
