@@ -2,72 +2,11 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   auth, lists as listsApi, items as itemsApi,
   location as locationApi, stores as storesApi,
-  compare as compareApi,
+  compare as compareApi, products as productsApi,
   setSession, getSession, clearSession,
   setStoredUser, getStoredUser,
   touchSession, isSessionExpired,
 } from "./api";
-
-// ─── Grocery Database (client-side catalog for searching — still simulated) ───
-const GROCERY_DB = [
-  { name: "Whole Milk (1 gal)", category: "Dairy", basePrice: 3.99 },
-  { name: "2% Milk (1 gal)", category: "Dairy", basePrice: 3.89 },
-  { name: "Large Eggs (dozen)", category: "Dairy", basePrice: 3.49 },
-  { name: "Butter (1 lb)", category: "Dairy", basePrice: 4.29 },
-  { name: "Cheddar Cheese (8 oz)", category: "Dairy", basePrice: 3.99 },
-  { name: "Greek Yogurt (32 oz)", category: "Dairy", basePrice: 5.49 },
-  { name: "Heavy Cream (16 oz)", category: "Dairy", basePrice: 3.99 },
-  { name: "Sour Cream (16 oz)", category: "Dairy", basePrice: 2.49 },
-  { name: "Bananas (1 lb)", category: "Produce", basePrice: 0.59 },
-  { name: "Apples (3 lb bag)", category: "Produce", basePrice: 4.99 },
-  { name: "Avocados (each)", category: "Produce", basePrice: 1.49 },
-  { name: "Tomatoes (1 lb)", category: "Produce", basePrice: 2.49 },
-  { name: "Onions (3 lb bag)", category: "Produce", basePrice: 3.29 },
-  { name: "Potatoes (5 lb bag)", category: "Produce", basePrice: 4.49 },
-  { name: "Carrots (2 lb bag)", category: "Produce", basePrice: 2.29 },
-  { name: "Broccoli (1 bunch)", category: "Produce", basePrice: 2.49 },
-  { name: "Spinach (10 oz)", category: "Produce", basePrice: 3.49 },
-  { name: "Lettuce (head)", category: "Produce", basePrice: 1.99 },
-  { name: "Bell Peppers (each)", category: "Produce", basePrice: 1.29 },
-  { name: "Garlic (3-pack)", category: "Produce", basePrice: 1.99 },
-  { name: "Lemons (each)", category: "Produce", basePrice: 0.69 },
-  { name: "Strawberries (1 lb)", category: "Produce", basePrice: 3.99 },
-  { name: "Blueberries (6 oz)", category: "Produce", basePrice: 3.49 },
-  { name: "Chicken Breast (1 lb)", category: "Meat", basePrice: 5.49 },
-  { name: "Ground Beef 80/20 (1 lb)", category: "Meat", basePrice: 5.99 },
-  { name: "Ground Turkey (1 lb)", category: "Meat", basePrice: 5.49 },
-  { name: "Pork Chops (1 lb)", category: "Meat", basePrice: 4.99 },
-  { name: "Bacon (12 oz)", category: "Meat", basePrice: 6.49 },
-  { name: "Salmon Fillet (1 lb)", category: "Meat", basePrice: 9.99 },
-  { name: "Italian Sausage (1 lb)", category: "Meat", basePrice: 4.99 },
-  { name: "Deli Turkey (1 lb)", category: "Meat", basePrice: 7.99 },
-  { name: "White Bread (loaf)", category: "Bakery", basePrice: 2.99 },
-  { name: "Whole Wheat Bread (loaf)", category: "Bakery", basePrice: 3.49 },
-  { name: "Hamburger Buns (8-pack)", category: "Bakery", basePrice: 2.99 },
-  { name: "Tortillas (10-pack)", category: "Bakery", basePrice: 3.29 },
-  { name: "White Rice (2 lb)", category: "Pantry", basePrice: 2.99 },
-  { name: "Pasta (1 lb)", category: "Pantry", basePrice: 1.49 },
-  { name: "Pasta Sauce (24 oz)", category: "Pantry", basePrice: 2.99 },
-  { name: "Olive Oil (16 oz)", category: "Pantry", basePrice: 6.99 },
-  { name: "Canola Oil (48 oz)", category: "Pantry", basePrice: 4.49 },
-  { name: "All-Purpose Flour (5 lb)", category: "Pantry", basePrice: 3.49 },
-  { name: "Granulated Sugar (4 lb)", category: "Pantry", basePrice: 3.49 },
-  { name: "Peanut Butter (16 oz)", category: "Pantry", basePrice: 3.49 },
-  { name: "Canned Tomatoes (28 oz)", category: "Pantry", basePrice: 1.99 },
-  { name: "Black Beans (15 oz can)", category: "Pantry", basePrice: 1.29 },
-  { name: "Chicken Broth (32 oz)", category: "Pantry", basePrice: 2.49 },
-  { name: "Cereal (family size)", category: "Pantry", basePrice: 4.99 },
-  { name: "Oatmeal (42 oz)", category: "Pantry", basePrice: 4.49 },
-  { name: "Coffee (12 oz bag)", category: "Beverages", basePrice: 8.99 },
-  { name: "Orange Juice (64 oz)", category: "Beverages", basePrice: 4.49 },
-  { name: "Sparkling Water (12-pack)", category: "Beverages", basePrice: 5.49 },
-  { name: "Paper Towels (6-pack)", category: "Household", basePrice: 8.99 },
-  { name: "Dish Soap (22 oz)", category: "Household", basePrice: 3.49 },
-  { name: "Trash Bags (50-count)", category: "Household", basePrice: 9.99 },
-  { name: "Frozen Pizza", category: "Frozen", basePrice: 5.99 },
-  { name: "Frozen Vegetables (16 oz)", category: "Frozen", basePrice: 2.49 },
-  { name: "Ice Cream (1.5 qt)", category: "Frozen", basePrice: 5.49 },
-];
 
 // ─── Simulated Store Generator (will be replaced by real data later) ───
 const STORE_CHAINS = [
@@ -419,8 +358,34 @@ useEffect(() => {
   };
 
   // ── Item Management ──
+  function estimateBasePrice(category) {
+    const estimates = {
+      Dairy: 4.29,
+      Produce: 2.99,
+      Meat: 6.49,
+      Bakery: 3.29,
+      Pantry: 3.49,
+      Beverages: 4.99,
+      Frozen: 4.49,
+      Snacks: 3.99,
+      Breakfast: 4.49,
+      Condiments: 3.29,
+      Household: 6.99,
+      Baby: 8.99,
+      Pet: 7.99,
+      Grocery: 3.99,
+    };
+    return estimates[category] || 3.99;
+  }
+
   const addItem = async (groceryItem) => {
     if (!currentList) return;
+
+    // Assign an estimated base price if none exists
+    const itemWithPrice = {
+      ...groceryItem,
+      basePrice: groceryItem.basePrice || estimateBasePrice(groceryItem.category),
+    };
     const existingItem = currentList.items.find(i => i.name === groceryItem.name);
 
     if (existingItem) {
@@ -524,13 +489,31 @@ useEffect(() => {
     }
   };
 
-  // ── Search (still client-side against GROCERY_DB) ──
+  // ── Debounced product search ──
+  const searchTimeoutRef = useRef(null);
+
   useEffect(() => {
-    if (searchQuery.trim().length < 1) { setSearchResults([]); return; }
-    const q = searchQuery.toLowerCase();
-    setSearchResults(GROCERY_DB.filter(item =>
-      item.name.toLowerCase().includes(q) || item.category.toLowerCase().includes(q)
-    ).slice(0, 8));
+    if (searchQuery.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+
+    // Debounce: wait 300ms after user stops typing
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+
+    searchTimeoutRef.current = setTimeout(async () => {
+      try {
+        const results = await productsApi.search(searchQuery);
+        setSearchResults(results);
+      } catch (err) {
+        console.error("Product search error:", err);
+        setSearchResults([]);
+      }
+    }, 300);
+
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    };
   }, [searchQuery]);
 
   // ── Price Comparison (still simulated) ──
@@ -573,8 +556,6 @@ useEffect(() => {
   };
 
   useEffect(() => { setAnimateIn(true); }, []);
-
-  const categories = [...new Set(GROCERY_DB.map(i => i.category))];
 
   // ─── RENDER ───
   return (
@@ -779,27 +760,41 @@ useEffect(() => {
               </div>
               {searchResults.length > 0 && (
                 <div style={styles.searchDropdown}>
-                  {searchResults.map(item => (
-                    <button key={item.name} style={styles.searchItem} onClick={() => addItem(item)}>
+                  {searchResults.map((item, idx) => (
+                    <button
+                      key={`${item.name}-${idx}`}
+                      style={styles.searchItem}
+                      onClick={() => addItem(item)}
+                    >
                       <div>
                         <span style={styles.searchItemName}>{item.name}</span>
-                        <span style={styles.searchItemCat}>{item.category}</span>
+                        <span style={styles.searchItemCat}>
+                          {item.category}
+                          {item.source === "local" && (
+                            <span style={styles.localTag}> · Price tracked</span>
+                          )}
+                        </span>
                       </div>
-                      <span style={styles.searchItemPrice}>${item.basePrice.toFixed(2)} avg</span>
+                      <span style={styles.searchItemPrice}>
+                        {item.basePrice
+                          ? `$${item.basePrice.toFixed(2)}`
+                          : "est. price"
+                        }
+                      </span>
                     </button>
                   ))}
                 </div>
               )}
             </div>
 
-            {/* Browse by Category */}
+            {/* Search Suggestions */}
             {searchQuery === "" && currentList.items.length === 0 && (
               <div style={styles.browseSection}>
-                <p style={styles.browseHint}>Or browse by category:</p>
+                <p style={styles.browseHint}>Try searching for:</p>
                 <div style={styles.catGrid}>
-                  {categories.map(cat => (
-                    <button key={cat} style={styles.catButton} onClick={() => setSearchQuery(cat)}>
-                      {cat}
+                  {["milk", "eggs", "bread", "chicken", "rice", "pasta", "butter", "cheese", "coffee", "cereal", "apples", "orange juice"].map(term => (
+                    <button key={term} style={styles.catButton} onClick={() => setSearchQuery(term)}>
+                      {term}
                     </button>
                   ))}
                 </div>
@@ -1112,6 +1107,7 @@ const styles = {
     borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 13, fontWeight: 600, color: "#64748b",
   },
   estTotal: { color: "#22d3ee" },
+  localTag: { color: "#22c55e", fontWeight: 600 },
   itemRow: {
     display: "flex", alignItems: "center", padding: "12px 20px", gap: 12,
     borderBottom: "1px solid rgba(255,255,255,0.03)",

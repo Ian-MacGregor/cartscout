@@ -169,3 +169,9 @@ export const compare = {
       body: JSON.stringify({ lat, lng, radius, items }),
     }),
 };
+
+// ─── Product Search ───
+export const products = {
+  search: (query) =>
+    request(`/api/products/search?q=${encodeURIComponent(query)}`),
+};
