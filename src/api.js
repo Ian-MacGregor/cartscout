@@ -1,7 +1,7 @@
 // ─── CartScout API Client ───
 // Update these URLs to match your deployment
 const API_URL = import.meta.env.PROD
-  ? "cartscout-api-production.up.railway.app"  // ← Replace with your Railway URL
+  ? "https://cartscout-api-production.up.railway.app"  // ← Replace with your Railway URL
   : "http://localhost:3001";
 
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
