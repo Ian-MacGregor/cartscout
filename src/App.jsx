@@ -348,7 +348,7 @@ export default function GroceryApp() {
         const lng = pos.coords.longitude;
         setLocation({ lat, lng });
         setLocationCoords(`${lat.toFixed(3)}°N, ${Math.abs(lng).toFixed(3)}°W`);
-        locationApi.update(lat, lng).catch(() => {});
+        locationApi.update(lat, lng, searchRadius).catch(() => {});
         const city = await reverseGeocode(lat, lng);
         setLocationName(city || `${lat.toFixed(3)}, ${lng.toFixed(3)}`);
       },
@@ -383,7 +383,17 @@ export default function GroceryApp() {
     setLocationCoords(`${lat.toFixed(3)}°N, ${Math.abs(lng).toFixed(3)}°W`);
     setLocationName(city || `${lat.toFixed(3)}, ${lng.toFixed(3)}`);
     setShowMapModal(false);
-    locationApi.update(lat, lng).catch(() => {});
+    locationApi.update(lat, lng, radius).catch(() => {});
+
+    // Check if stores exist in this area, scrape if not
+    try {
+      const result = await storesApi.refresh(lat, lng, radius);
+      if (result.status === "scraped") {
+        console.log(`[location] Scraped ${result.count} new stores`);
+      }
+    } catch (err) {
+      console.error("[location] On-demand scrape failed:", err);
+    }
   };
 
   // ── List Management ──

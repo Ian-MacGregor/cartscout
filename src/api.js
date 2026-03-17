@@ -148,10 +148,10 @@ export const items = {
 
 // ─── Location ───
 export const location = {
-  update: (lat, lng) =>
+  update: (lat, lng, radius) =>
     request("/api/location", {
       method: "POST",
-      body: JSON.stringify({ lat, lng }),
+      body: JSON.stringify({ lat, lng, radius }),
     }),
 };
 
@@ -159,6 +159,11 @@ export const location = {
 export const stores = {
   nearby: (lat, lng, radius = 20) =>
     request(`/api/stores?lat=${lat}&lng=${lng}&radius=${radius}`),
+  refresh: (lat, lng, radius = 20) =>
+    request("/api/stores/refresh", {
+      method: "POST",
+      body: JSON.stringify({ lat, lng, radius }),
+    }),
 };
 
 // ─── Products ───
