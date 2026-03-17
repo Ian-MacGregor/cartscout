@@ -1,12 +1,12 @@
 // ─── CartScout API Client ───
 // Update these URLs to match your deployment
 const API_URL = import.meta.env.PROD
-  ? "https://cartscout-api-production.up.railway.app"  // ← API Hosting Location
+  ? "cartscout-api-production.up.railway.app"  // ← Replace with your Railway URL
   : "http://localhost:3001";
 
-let session = null;
-
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
+let session = null;
 
 export function setSession(s) {
   session = s;
@@ -17,16 +17,6 @@ export function setSession(s) {
     sessionStorage.removeItem("cartscout_session");
     sessionStorage.removeItem("cartscout_session_last_active");
   }
-}
-
-export function touchSession() {
-  sessionStorage.setItem("cartscout_session_last_active", Date.now().toString());
-}
-
-export function isSessionExpired() {
-  const lastActive = sessionStorage.getItem("cartscout_session_last_active");
-  if (!lastActive) return true;
-  return Date.now() - parseInt(lastActive) > SESSION_TIMEOUT_MS;
 }
 
 export function getSession() {
@@ -45,6 +35,17 @@ export function clearSession() {
   session = null;
   sessionStorage.removeItem("cartscout_session");
   sessionStorage.removeItem("cartscout_user");
+  sessionStorage.removeItem("cartscout_session_last_active");
+}
+
+export function touchSession() {
+  sessionStorage.setItem("cartscout_session_last_active", Date.now().toString());
+}
+
+export function isSessionExpired() {
+  const lastActive = sessionStorage.getItem("cartscout_session_last_active");
+  if (!lastActive) return true;
+  return Date.now() - parseInt(lastActive) > SESSION_TIMEOUT_MS;
 }
 
 export function setStoredUser(u) {
@@ -77,7 +78,6 @@ async function request(path, options = {}) {
 
   const data = await res.json();
 
-  // If the server says unauthorized, the session is dead
   if (res.status === 401) {
     clearSession();
     window.dispatchEvent(new CustomEvent("cartscout:session_expired"));
@@ -146,12 +146,6 @@ export const items = {
     request(`/api/items/${itemId}`, { method: "DELETE" }),
 };
 
-// ─── Stores ───
-export const stores = {
-  nearby: (lat, lng, radius = 20) =>
-    request(`/api/stores?lat=${lat}&lng=${lng}&radius=${radius}`),
-};
-
 // ─── Location ───
 export const location = {
   update: (lat, lng) =>
@@ -159,6 +153,18 @@ export const location = {
       method: "POST",
       body: JSON.stringify({ lat, lng }),
     }),
+};
+
+// ─── Stores ───
+export const stores = {
+  nearby: (lat, lng, radius = 20) =>
+    request(`/api/stores?lat=${lat}&lng=${lng}&radius=${radius}`),
+};
+
+// ─── Products ───
+export const products = {
+  search: (query) =>
+    request(`/api/products/search?q=${encodeURIComponent(query)}`),
 };
 
 // ─── Price Comparison ───
@@ -170,8 +176,25 @@ export const compare = {
     }),
 };
 
-// ─── Product Search ───
-export const products = {
-  search: (query) =>
-    request(`/api/products/search?q=${encodeURIComponent(query)}`),
-};
+// ─── Reverse Geocode (free, no API key, called directly) ───
+export async function reverseGeocode(lat, lng) {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=12`,
+      {
+        headers: { "User-Agent": "CartScout/1.0" },
+        signal: AbortSignal.timeout(5000),
+      }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const a = data.address || {};
+    const city = a.city || a.town || a.village || a.hamlet || a.county || "";
+    const state = a.state || "";
+    if (city && state) return `${city}, ${state}`;
+    if (city) return city;
+    return null;
+  } catch {
+    return null;
+  }
+}
